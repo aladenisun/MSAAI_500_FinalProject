@@ -1,116 +1,143 @@
-from DataProcessing import pd, np, sns, plt, pt, smf, stats
-from DataProcessing import preprocess_data
+from __future__ import annotations
+from DataProcessing import pd, np, sns, plt, pt, stats
+import statsmodels.api as sm
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.metrics import (accuracy_score, precision_score, recall_score,
+                             f1_score, roc_auc_score, roc_curve, confusion_matrix)
+from sklearn.model_selection import train_test_split
+from dataclasses import dataclass
+
+APA_P = lambda p: f"< .001" if p < 0.001 else f"= {p:.4f}"
+
+@dataclass
+class Split:
+    X_train: pd.DataFrame
+    X_test: pd.DataFrame
+    y_train: pd.Series
+    y_test: pd.Series
 
 # Independent Samples Welch's T-Test
-def ttest_resources_vs_comfort(data):
-    """
-    Performs an independent samples t-test comparing mean comfort sharing
-    between employees WITH and WITHOUT access to mental health resources,
-    restricted to tech employees.
+class ModelAnalysis:
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
 
-    Parameters:
-        data (DataFrame): Original dataset.
+    def welch_test(self, a: np.ndarray, b: np.ndarray) -> tuple[float, float, float]:
+            md = a.mean() - b.mean()
+            se = np.sqrt(a.var(ddof=1)/len(a) + b.var(ddof=1)/len(b))
+            ci = (md - 1.96*se, md + 1.96*se)
+            return md, ci[0], ci[1]
 
-    Returns:
-        dict: Results including t-statistic, p-value, confidence interval,
-              mean difference, and effect size.
-    """
+    def ttest_report(self, group_col: str, target_col: str, label: str) -> dict:
+        a = self.df.loc[self.df[group_col] == 1, target_col].dropna().values
+        b = self.df.loc[self.df[group_col] == 0, target_col].dropna().values
+        t, p = stats.ttest_ind(a, b, equal_var=False)
+        md, lo, hi = self.welch_test(a, b)
+        return {
+            "Variable": label,
+            "t(df)": f"{t:.3f}",   # (Welch's df omitted to avoid clutter; optional to add)
+            "p": APA_P(p),
+            "Mean Diff": f"{md:.2f}",
+            "95% CI": f"[{lo:.2f}, {hi:.2f}]",
+            "Significance": "Sig." if p < 0.05 else "Not Sig."
+        }
 
-    df = data.copy()
-    df.columns = df.columns.str.strip().str.lower()
-
-    df = df[df['workplace_resources'].isin(['Yes', 'No'])]
-    df['res_access'] = (df['workplace_resources'] == 'Yes').astype(int)
-    df = df[['mh_share', 'res_access']].dropna()
-
-    yes = df.loc[df['res_access'] == 1, 'mh_share']
-    no = df.loc[df['res_access'] == 0, 'mh_share']
-
-    # Use the Welch’s method to compute t-test
-    t_stat, p_val = stats.ttest_ind(yes, no, equal_var=False)
-
-    # Compute confidence interval and effect size
-    s1, s0 = yes.std(ddof=1), no.std(ddof=1)
-    n1, n0 = len(yes), len(no)
-    se_diff = np.sqrt(s1**2/n1 + s0**2/n0)
-
-    df_num = (s1**2/n1 + s0**2/n0)**2
-    df_den = ((s1**2/n1)**2/(n1-1)) + ((s0**2/n0)**2/(n0-1))
-    df_welch = df_num / df_den
-    t_crit = stats.t.ppf(0.975, df_welch)
-
-    mean_diff = yes.mean() - no.mean()
-    ci_low = mean_diff - t_crit * se_diff
-    ci_high = mean_diff + t_crit * se_diff
-
-    # Step 4: Print summary
-    print("\n--- Independent Samples t-Test (Tech Employees Only) ---")
-    print(f"t = {t_stat:.3f},  df ≈ {df_welch:.1f},  p = {p_val:.4f}")
-    print(f"Mean difference (Yes - No) = {mean_diff:.3f}")
-    print(f"95% CI = [{ci_low:.3f}, {ci_high:.3f}]")
-    print("\nInterpretation: "
-          "A small to moderate effect suggests that employees with access "
-          "to mental health resources tend to report higher comfort sharing levels "
-          "if the mean difference is positive.\n")
-
-    # Step 5: Visualization
-    plt.figure(figsize=(7,5))
-    sns.boxplot(x='res_access', y='mh_share', data=df)
-    plt.xticks([0,1], ['No Access', 'Access'])
-    plt.xlabel('Access to mental health resources')
-    plt.ylabel('Comfort sharing level')
-    plt.title('Comfort Sharing by Access to Resources (Tech Employees)')
-    plt.tight_layout()
-    plt.show()
-
-    return {
-        't_stat': t_stat,
-        'p_value': p_val,
-        'df': df_welch,
-        'mean_diff': mean_diff,
-        'ci_low': ci_low,
-        'ci_high': ci_high,
-    }
+    def ttest_table(self) -> pd.DataFrame:
+        rows = []
+        rows.append(self.ttest_report("workplace_resources_binary" if "workplace_resources_binary" in self.df.columns else "resources_binary", "mh_share", "Resources Binary"))
+        rows.append(self.ttest_report("employer_binary", "mh_share", "Employer Discussion"))
+        rows.append(self.ttest_report("coverage_binary", "mh_share", "Coverage Binary"))
+        return pd.DataFrame(rows, columns=["Variable", "t(df)", "p", "Mean Diff", "95% CI", "Significance"])
 
 
- # Linear Regression Model
-def linear_regression_model(data):
-    """
-    Fits a simple linear regression model predicting comfort sharing
-    from access to mental health resources for tech employees.
+    # LOGISTIC REGRESSION
+    # ---------- Provide X/y split ----------
+    def get_xy(self) -> tuple[pd.DataFrame, pd.Series]:
+        assert self.df is not None, "Call build_features() first."
+        X = self.df[[
+            "resources_binary", "employer_binary", "coverage_binary",
+            "combined_support", "gender_binary", "age_scaled"
+        ]].copy()
+        y = self.df["high_comfort"].astype(int).copy()
+        return X, y
 
-    Parameters:
-        data : Filtered dataset.
+    def train_test_split(self, test_size: float = 0.2, random_state: int = 42) -> Split:
+        X, y = self.get_xy()
+        Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y)
+        return Split(Xtr, Xte, ytr, yte)
 
-    Returns:
-        Regression summary i.e. a statsmodels object
-    """
+    def fit_improved_logistic(self, X: pd.DataFrame, y: pd.Series) -> LogisticRegression:
+        model = LogisticRegression(max_iter=1000, solver="liblinear")
+        model.fit(X, y)
+        return model
 
-    df = data.copy()
-    df.columns = df.columns.str.strip().str.lower()
+    def coef_table(self, model: LogisticRegression, feature_names: list[str]) -> pd.DataFrame:
+        coefs = model.coef_[0]
+        df = pd.DataFrame({"Predictor": feature_names, "β": coefs, "OR": np.exp(coefs)})
+        return df.sort_values("OR", ascending=False).reset_index(drop=True).round(3)
 
-    df['workplace_resources'] = df['workplace_resources'].str.strip().str.title()
-    df = df[df['workplace_resources'].isin(['Yes', 'No'])]
-    df['res_access'] = (df['workplace_resources'] == 'Yes').astype(int)
-    df = df[['mh_share', 'res_access']].dropna()
+    def statsmodels_logit(self, X: pd.DataFrame, y: pd.Series):
+        Xc = sm.add_constant(X)
+        logit = sm.Logit(y, Xc)
+        result = logit.fit(disp=False)
+        summ = result.summary2().tables[1].copy()
+        # Rename for APA friendliness
+        summ = summ.rename(columns={"Coef.": "β", "Std.Err.": "SE", "P>|z|": "p", "[0.025": "CI Low", "0.975]": "CI High"})
+        summ["OR"] = np.exp(summ["β"])
+        # Order columns
+        summ = summ[["β", "SE", "OR", "CI Low", "CI High", "p"]]
+        return summ.round(3), result
 
-    model = smf.ols('mh_share ~ res_access', data=df).fit()
-    print("\n--- Linear Regression: Comfort Sharing ~ Access to Resources ---")
-    print(model.summary())
-    print("\nInterpretation: "
-          "The correlation coefficient for 'res_access' represents how much higher the mean "
-          "comfort sharing level is for employees with access to mental health resources "
-          "versus to those without. A positive, significant beta supports the hypothesis.\n")
+    # ---------- MODEL COMPARISON ----------
+    def evaluate(self, y_true, y_prob, y_pred) -> dict:
+        return {
+            "Accuracy": accuracy_score(y_true, y_pred),
+            "Precision": precision_score(y_true, y_pred, zero_division=0),
+            "Recall": recall_score(y_true, y_pred, zero_division=0),
+            "F1 Score": f1_score(y_true, y_pred, zero_division=0),
+            "AUC": roc_auc_score(y_true, y_prob)
+        }
 
-    # Regression visualization
-    plt.figure(figsize=(7,5))
-    sns.regplot(x='res_access', y='mh_share', data=df, logistic=False,
-                x_jitter=0.1, scatter_kws={'alpha':0.3})
-    plt.xticks([0,1], ['No Access', 'Access'])
-    plt.xlabel('Access to mental health resources')
-    plt.ylabel('Comfort sharing level')
-    plt.title('Regression of Comfort Sharing on Resource Access')
-    plt.tight_layout()
-    plt.show()
+    def compare_models(self, X_train, X_test, y_train, y_test) -> pd.DataFrame:
+        # 1) Baseline logistic (simple logistic on intercept only -> predicts majority class probability)
+        # We emulate your baseline behavior by fitting on a single constant column.
+        X_train_base = np.ones((len(X_train), 1))
+        X_test_base  = np.ones((len(X_test), 1))
+        base = LogisticRegression(solver="liblinear")
+        base.fit(X_train_base, y_train)
+        prob_b = base.predict_proba(X_test_base)[:, 1]
+        pred_b = (prob_b >= 0.5).astype(int)
+        perf_base = self.evaluate(y_test, prob_b, pred_b)
 
-    return model
+        # 2) Improved Logistic (all features)
+        log_imp = LogisticRegression(max_iter=1000, solver="liblinear")
+        log_imp.fit(X_train, y_train)
+        prob_l = log_imp.predict_proba(X_test)[:, 1]
+        pred_l = (prob_l >= 0.5).astype(int)
+        perf_log = self.evaluate(y_test, prob_l, pred_l)
+
+        # 3) Random Forest
+        rf = RandomForestClassifier(
+            n_estimators=300, max_depth=None, min_samples_leaf=2, random_state=42
+        )
+        rf.fit(X_train, y_train)
+        prob_rf = rf.predict_proba(X_test)[:, 1]
+        pred_rf = (prob_rf >= 0.5).astype(int)
+        perf_rf = self.evaluate(y_test, prob_rf, pred_rf)
+
+        # 4) Gradient Boosting
+        gb = GradientBoostingClassifier(random_state=42)
+        gb.fit(X_train, y_train)
+        prob_gb = gb.predict_proba(X_test)[:, 1]
+        pred_gb = (prob_gb >= 0.5).astype(int)
+        perf_gb = self.evaluate(y_test, prob_gb, pred_gb)
+
+        perf = pd.DataFrame.from_records([
+            {"Model": "Baseline Logistic"} | perf_base,
+            {"Model": "Improved Logistic"} | perf_log,
+            {"Model": "Random Forest"} | perf_rf,
+            {"Model": "Gradient Boosting"} | perf_gb,
+        ])
+        # Nice rounding/order
+        cols = ["Model", "Accuracy", "Precision", "Recall", "F1 Score", "AUC"]
+        return perf[cols].round(3).sort_values("AUC", ascending=False).reset_index(drop=True)
