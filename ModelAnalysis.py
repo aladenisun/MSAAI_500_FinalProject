@@ -235,22 +235,37 @@ class ModelAnalysis:
     def plot_confusion_matrices(
         self, y_true: pd.Series, preds: Dict[str, np.ndarray]
     ):
-        for name, yhat in preds.items():
-            cm = confusion_matrix(y_true, yhat)
-            fig, ax = plt.subplots(figsize=(4.5, 4.5))
+        fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+        axes = axes.flatten()  # Flatten for easier iteration
+
+        for ax, (model_name, y_pred) in zip(axes, preds.items()):
+            cm = confusion_matrix(y_true, y_pred)
+            acc = accuracy_score(y_true, y_pred)
+
+            # Heatmap with gridlines between cells
             sns.heatmap(
                 cm,
                 annot=True,
                 fmt="d",
                 cmap="Blues",
+                cbar=True,
+                ax=ax,
+                linewidths=1,        # <-- Adds gridlines
+                linecolor="black",   # <-- Color of gridlines
+                square=True,          # Makes cells square and uniform
                 xticklabels=["Pred: Low","Pred: High"],
-                yticklabels=["True: Low","True: High"])
+                yticklabels=["True: Low","True: High"]
+            )
 
-            ax.set_title(f"Confusion Matrix — {name}", fontsize=14, fontweight="bold", pad=15)
-            ax.set_xlabel("Predicted Label", fontsize=12)
-            ax.set_ylabel("True Label", fontsize=12)
-            plt.tight_layout()
-            plt.show()
+            ax.set_title(f"{model_name}\nAccuracy = {acc:.2f}", fontsize=11, pad=8)
+            ax.set_xlabel("Predicted Label")
+            ax.set_ylabel("True Label")
+            ax.tick_params(axis='x', labelrotation=45)
+            ax.tick_params(axis='y', labelrotation=0)
+
+        plt.tight_layout()
+        plt.show()
+
 
     # Feature importance tables
     def feature_importance_tables(
