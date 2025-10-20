@@ -38,7 +38,7 @@ class ModelAnalysis:
         md, lo, hi = self.welch_test(a, b)
         return {
             "Variable": label,
-            "t(df)": f"{t:.3f}",   # (Welch's df omitted to avoid clutter; optional to add)
+            "t(df)": f"{t:.3f}",
             "p": APA_P(p),
             "Mean Diff": f"{md:.2f}",
             "95% CI": f"[{lo:.2f}, {hi:.2f}]",
@@ -84,10 +84,8 @@ class ModelAnalysis:
         logit = sm.Logit(y, Xc)
         result = logit.fit(disp=False)
         summ = result.summary2().tables[1].copy()
-        # Rename for APA friendliness
         summ = summ.rename(columns={"Coef.": "β", "Std.Err.": "SE", "P>|z|": "p", "[0.025": "CI Low", "0.975]": "CI High"})
         summ["OR"] = np.exp(summ["β"])
-        # Order columns
         summ = summ[["β", "SE", "OR", "CI Low", "CI High", "p"]]
         return summ.round(3), result
 
@@ -102,8 +100,7 @@ class ModelAnalysis:
         }
 
     def compare_models(self, X_train, X_test, y_train, y_test) -> pd.DataFrame:
-        # 1) Baseline logistic (simple logistic on intercept only -> predicts majority class probability)
-        # We emulate your baseline behavior by fitting on a single constant column.
+        # 1) Baseline logistic (simple logistic on intercept only
         X_train_base = np.ones((len(X_train), 1))
         X_test_base  = np.ones((len(X_test), 1))
         base = LogisticRegression(solver="liblinear")
@@ -112,7 +109,7 @@ class ModelAnalysis:
         pred_b = (prob_b >= 0.5).astype(int)
         perf_base = self.evaluate(y_test, prob_b, pred_b)
 
-        # 2) Improved Logistic (all features)
+        # 2) Improved Logistic
         log_imp = LogisticRegression(max_iter=1000, solver="liblinear")
         log_imp.fit(X_train, y_train)
         prob_l = log_imp.predict_proba(X_test)[:, 1]
@@ -141,7 +138,7 @@ class ModelAnalysis:
             {"Model": "Random Forest"} | perf_rf,
             {"Model": "Gradient Boosting"} | perf_gb,
         ])
-        # Nice rounding/order
+        # Nice rounding
         cols = ["Model", "Accuracy", "Precision", "Recall", "F1 Score", "AUC"]
         return perf[cols].round(3).sort_values("AUC", ascending=False).reset_index(drop=True)
 
@@ -152,7 +149,7 @@ class ModelAnalysis:
     ) -> Dict[str, object]:
         models = {}
 
-        # Baseline logistic (intercept-only emulation via single constant feature)
+        # Baseline logistic (intercept only)
         base = LogisticRegression(solver="liblinear")
         base.fit(np.ones((len(X_train), 1)), y_train)
         models["Baseline Logistic"] = base
@@ -187,7 +184,7 @@ class ModelAnalysis:
         probs, preds = {}, {}
         for name, mdl in models.items():
             if name == "Baseline Logistic":
-                # Use intercept-only fitted on constant feature; mirror test-shape
+                # Use intercept only fitted on constant
                 p = mdl.predict_proba(np.ones((len(X_test), 1)))[:, 1]
             else:
                 p = mdl.predict_proba(X_test)[:, 1]
@@ -250,9 +247,9 @@ class ModelAnalysis:
                 cmap="Blues",
                 cbar=True,
                 ax=ax,
-                linewidths=1,        # <-- Adds gridlines
-                linecolor="black",   # <-- Color of gridlines
-                square=True,          # Makes cells square and uniform
+                linewidths=1,    
+                linecolor="black", 
+                square=True,          
                 xticklabels=["Pred: Low","Pred: High"],
                 yticklabels=["True: Low","True: High"]
             )
