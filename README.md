@@ -6,7 +6,7 @@ Source: Medical Dataset Survey dataset on mental health in tech professionals fr
 Local file: data.csv (included in this repository)
 The dataset contains responses from technology professionals regarding mental health experiences, workplace support, and demographic variables.
 
-## Deliverables:
+## Deliverables
 - Technical Report (PDF):
 Includes statistical analysis, regression outputs, and machine learning results comparing Logistic Regression, Random Forest, and Gradient Boosting models.
 - Video Presentation (MP4):
