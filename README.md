@@ -1,4 +1,4 @@
-# MSAAI_500_FinalProject
+# Creating a Culture of Openness (MSAAI_500_FinalProject)
 This repository contains our group project for the Applied Artificial Intelligence program. We use the Survey dataset on mental health in tech professionals (OSMI 2017–2021) to perform data cleaning, exploratory data analysis, and predictive modeling. Deliverables include a technical report and Python code/notebooks following PEP 8 standards.
 
 ## Dataset
